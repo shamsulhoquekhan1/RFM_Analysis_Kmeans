@@ -1,0 +1,243 @@
+---
+title: "RFM Analysis"
+author: "Md Shamsul Hoque Khan"
+date: "2023-08-23"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction to RFM Analysis
+
+RFM (Recency, Frequency, Monetary) analysis is a customer segmentation technique that helps marketers understand the behavior of their customers. Each customer is scored on three dimensions:
+
+Recency: How recently the customer made a purchase
+Frequency: How often the customer makes a purchase
+Monetary: How much the customer spends
+Through clustering these metrics, businesses can identify customer groups and design targeted marketing strategies.
+
+# Preprocessing
+## Load Required Libraries
+
+```{r}
+# Load tidyverse for data manipulation and ggplot2 for plotting
+library(tidyverse)
+
+# Load readxl for reading Excel files
+library(readxl)
+
+```
+
+## Load the Data
+
+```{r}
+# Load the sample_superstore data set downloaded from Tableau Public
+suppressWarnings({
+  df <- read_excel("sample_superstore.xls")
+})
+
+
+```
+
+# Data Exploration
+
+## Check for Missing Values
+
+```{r}
+# Check for any missing values in the data
+sum(is.na(df))
+
+```
+
+No missing values are found in the dataset.
+
+
+## Check Data Structure
+
+```{r}
+# Examine the structure of the dataset
+str(df)
+
+```
+
+The data columns are in the correct format.
+
+# RFM Calculation
+
+## Recency Calculation
+
+```{r}
+# Identify the latest date in the dataset
+max(df$`Order Date`)
+
+```
+
+
+The dataset contains data up to December 2017.
+
+```{r}
+# Calculate recency for each customer
+reference_date <- as.Date(max(df$"Order Date")) + 1
+
+recency_df <- df %>%
+  group_by(`Customer ID`) %>%
+  summarise(Recency = as.numeric(difftime(reference_date, max(`Order Date`), units="days"))) %>%
+  arrange(Recency)
+
+tail(recency_df)
+
+```
+
+
+## Frequency Calculation
+
+```{r}
+# Calculate the frequency of purchases for each customer
+frequency_df <- df %>%
+  group_by(`Customer ID`) %>%
+  summarise(Frequency = n()) %>%
+  arrange(desc(Frequency))
+
+```
+
+## Monetary Value Calculation
+
+```{r}
+# Calculate the monetary value (based on Sales) for each customer
+monetary_df <- df %>%
+  group_by(`Customer ID`) %>%
+  summarise(Monetary = sum(Sales))
+
+```
+
+## Combine RFM Metrics
+
+```{r}
+# Combine Recency, Frequency, and Monetary metrics into one RFM DataFrame
+rfm_df <- recency_df %>%
+  inner_join(frequency_df, by = "Customer ID") %>%
+  inner_join(monetary_df, by = "Customer ID")
+
+# Standardize the metrics for further clustering
+scaled_rfm <- as.data.frame(scale(rfm_df[, c('Recency', 'Frequency', 'Monetary')]))
+scaled_rfm_with_ID <- data.frame("Customer ID" = rfm_df$`Customer ID`, scaled_rfm)
+
+head(scaled_rfm_with_ID)
+
+```
+
+
+# Clustering
+
+## Determine Number of Clusters
+
+```{r}
+# Use the elbow method to identify the optimal number of clusters
+set.seed(12)
+wss <- numeric()
+
+for (i in 1:10){
+  kmeans_model <- kmeans(scaled_rfm_with_ID[,-1], centers = i, nstart = 20)
+  wss[i] <- kmeans_model$tot.withinss
+}
+
+```
+
+
+## Elbow Plot
+
+```{r}
+# Plot the elbow graph to determine the optimal number of clusters
+ggplot(data.frame(Clusters = 1:10, WSS = wss), aes(x = Clusters, y = WSS)) +
+  geom_point() +
+  geom_line() +
+  ggtitle("Elbow Method to Determine Optimal Number of Clusters") +
+  xlab("Number of Clusters") +
+  ylab("Within-Cluster Sum of Squares") +
+  scale_x_continuous(breaks = seq(1, 10, by = 1))
+
+```
+
+Based on the elbow plot, 3 clusters appear to be optimal.
+
+
+## K-Means Clustering
+
+```{r}
+# Run K-means clustering algorithm with the optimal number of clusters (3)
+set.seed(12)
+kmeans_model <- kmeans(scaled_rfm_with_ID[,-1], centers = 3, nstart = 20)
+
+# Add the cluster labels to the original RFM DataFrame
+rfm_df[, "Cluster"] <- kmeans_model$cluster
+
+```
+
+
+# Cluster Analysis
+
+## Cluster Descriptions
+
+```{r}
+# Calculate the average Recency, Frequency, and Monetary value for each cluster
+group_rfm_df <- rfm_df %>% 
+  group_by(Cluster) %>% 
+  summarise(
+    Recency = mean(Recency),
+    Frequency = mean(Frequency),
+    Monetary = mean(Monetary)
+  )
+
+group_rfm_df
+
+```
+
+
+## Label Customer Types
+
+```{r}
+# Label customer types based on their cluster
+rfm_df_labeled <- rfm_df %>% 
+  mutate(
+    Customer_type = case_when(Cluster == 1 ~ "Great Customer",
+                              Cluster == 2 ~ "Disloyal Customer",
+                              TRUE ~ "Average Customer")
+  )
+
+head(filter(rfm_df_labeled, Cluster == 2))
+
+```
+
+## Plotting Customer Types
+
+```{r}
+# Bar plot to show the distribution of customer types
+ggplot(rfm_df_labeled, aes(x = Customer_type, fill = Customer_type)) +
+  geom_bar() +
+  geom_text(
+    aes(label = ..count..),
+    stat = 'count',
+    position = position_stack(vjust = 0.5)
+  ) +
+  ggtitle("Distribution of Customer Types") +
+  xlab("Customer Type") +
+  ylab("Frequency") +
+  scale_fill_manual(values = c("Great Customer" = "dark green", "Average Customer" = "blue", "Disloyal Customer" = "red"))
+
+```
+
+# Conclusion
+
+Based on the RFM analysis, we observe a large number of Average Customers and a reasonable number of Great Customers. Only about 14.75% of the customer base is classified as disloyal. The store should focus its marketing efforts on retaining Great Customers and converting Average Customers to Great Customers.
+
+
+
+
+
+
+
+
+
+
